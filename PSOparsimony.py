@@ -243,7 +243,7 @@ def _crossover(population, fitnessval, fitnesstst, complexity, parents_indexes, 
 
 
 
-class HybridPSOGAparsimony(object):
+class PSOparsimony(object):
 
     def __init__(self,
                  fitness,
