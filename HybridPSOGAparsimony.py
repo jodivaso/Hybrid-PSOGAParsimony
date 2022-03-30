@@ -260,6 +260,7 @@ class HybridPSOGAparsimony(object):
                  IW_min=0.4,
                  K=3,
                  pmutation=None,
+                 pcrossover=None, #an array or a float (number between 0 and 1).
                  tol = 1e-4,
                  rerank_error=0.005,
                  keep_history = False,
@@ -301,6 +302,22 @@ class HybridPSOGAparsimony(object):
         # Percentage of particles that will be influenced by the best global of their neighbourhoods
         # (otherwise, they will be influenced by the best of the iteration in each neighbourhood)
         self.best_global_thres = best_global_thres
+
+        if pcrossover is not None:
+            if isinstance(pcrossover,(list,np.ndarray)): #If it is a list or an np array
+                if len(pcrossover) < maxiter:
+                    # If the length of the pcrossover array is lower than the iterations, the array is completed with zeros
+                    # up to the number of iterations.
+                    self.pcrossover = np.zeros(maxiter).astype(float)
+                    self.pcrossover[:len(pcrossover)] = pcrossover[:]
+                else:
+                    self.pcrossover = pcrossover
+            else:
+                #If the parameter was a float, then an array is built in which each position contains that float.
+                self.pcrossover = np.full(maxiter, pcrossover, dtype=float)
+            # Ensure all numbers are in the range [0,0.5]
+            self.pcrossover[self.pcrossover > 0.5] = 0.5
+            self.pcrossover[self.pcrossover < 0] = 0
 
 
         if particles_to_delete is not None and len(particles_to_delete) < maxiter:
@@ -648,24 +665,18 @@ class HybridPSOGAparsimony(object):
             ######################
             # Crossover step
             ######################
-            nmating = int(np.floor(self.npart / 2))
-            mating = np.random.choice(list(range(2 * nmating)), size=(2 * nmating), replace=False).reshape((nmating, 2)) #Hace npart/2 parejas de partículas
-            for i in range(nmating):
-                if 0.8 > np.random.uniform(low=0, high=1): #Si no lo entiendo mal, con esto está "cruzando" el 80% de todas las parejas de partículas.
-                    #Creo que solo hay que cruzar a los buenos para sustituir a los malos (y los buenos se quedan donde estaban).
-                    #parents_indexes = mating[i,]
-                    parents_indexes = [2,3]
-                    children_indexes=[0,1]
-                    print("HYPERPARAMETNROS", nparams)
-                    print("FEATURES", nfs)
-                    print(parents_indexes)
+            if self.pcrossover is not None and self.pcrossover[iter]>0:
+                half_npart_crossover = max(1,int(np.floor(self.npart * self.pcrossover[iter])/2)) #Minimum 2 particles
+                npart_crossover = 2*half_npart_crossover
+                indexes_best_particles = sort[ord_rerank[0:npart_crossover]]
+                mating_parents = np.random.choice(list(indexes_best_particles), size=(npart_crossover), replace=False).reshape((half_npart_crossover, 2))
+                indexes_worst_particles = sort[ord_rerank[-npart_crossover:]]
+                mating_children = indexes_worst_particles.reshape((half_npart_crossover,2))
+                for i in range(half_npart_crossover):
+                    parents_indexes = mating_parents[i,]
+                    children_indexes = mating_children[i,]
                     _crossover(population, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes)
-                    print("ANTES")
-                    print(population._pop[parents_indexes])
-                    print("DESPUES")
-                    print(population._pop[children_indexes])
-            #print("ITERACION", iter)
-            #print(mating)
+
 
             ######################
             # Mutation of FEATURES
