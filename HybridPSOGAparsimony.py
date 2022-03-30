@@ -268,7 +268,7 @@ class HybridPSOGAparsimony(object):
                  best_global_thres = 1,
                  particles_to_delete=None,
                  seed_ini = None,
-                 verbose=1):
+                 verbose=0):
 
         self.type_ini_pop = type_ini_pop
         self.fitness = fitness
