@@ -184,6 +184,64 @@ def _rerank(fitnessval, complexity, popSize, rerank_error, preserve_best=True):
                 error_posic = cost1[pos1]
     return position
 
+def _crossover(population, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes, alpha=0.1, perc_to_swap=0.5):
+
+    #p = parents.copy()
+    c = children_indexes.copy()
+
+    parents = population._pop[parents_indexes]
+    children = population._pop[parents_indexes].copy()  # Children will be the crossover of the parents
+
+    pos_param_n = population._pos_n
+    pos_param_c = population._pos_c
+    pos_features = np.array(
+        list(range(len(population._params), len(population._params) + len(population.colsnames))))
+
+    # Heuristic Blending for parameters not categoricals
+    Betas = np.random.uniform(size=len(pos_param_n), low=0, high=1) * (1 + 2 * alpha) - alpha  # 1+alpha*2??????
+    children[0, pos_param_n] = parents[0, pos_param_n] - Betas * parents[0, pos_param_n] + Betas * parents[
+        1, pos_param_n]  ## MAP??
+    children[1, pos_param_n] = parents[1, pos_param_n] - Betas * parents[1, pos_param_n] + Betas * parents[
+        0, pos_param_n]
+
+    # Random swapping for categorical parameters
+    swap_param_c = np.random.uniform(size=len(pos_param_c), low=0, high=1) >= perc_to_swap
+    if np.sum(swap_param_c) > 0:
+        parameters_c_parent1 = parents[0, pos_param_c]
+        parameters_c_parent2 = parents[1, pos_param_c]
+        pos_param_c = np.array(pos_param_c)[swap_param_c]
+        children[0, pos_param_c] = parameters_c_parent2[swap_param_c]
+        children[1, pos_param_c] = parameters_c_parent1[swap_param_c]
+
+    # Random swapping for features
+    swap_param = np.random.uniform(size=len(population.colsnames), low=0, high=1) >= perc_to_swap
+    if np.sum(swap_param) > 0:
+        features_parent1 = parents[0, pos_features]
+        features_parent2 = parents[1, pos_features]
+        pos_features = pos_features[swap_param]
+        children[0, pos_features] = features_parent2[swap_param]
+        children[1, pos_features] = features_parent1[swap_param]
+
+    # correct params that are outside (min and max)
+    thereis_min = children[0] < population._min
+    children[0, thereis_min] = population._min[thereis_min]
+    thereis_min = children[1] < population._min
+    children[1, thereis_min] = population._min[thereis_min]
+
+    thereis_max = children[0] > population._max
+    children[0, thereis_max] = population._max[thereis_max]
+    thereis_max = (children[1] > population._max)
+    children[1, thereis_max] = population._max[thereis_max]
+
+    aux = np.empty(2)
+    aux[:] = np.nan
+
+    population[c] = children
+    fitnessval[c] = aux.copy()
+    fitnesstst[c] = aux.copy()
+    complexity[c] = aux.copy()
+
+
 
 class HybridPSOGAparsimony(object):
 
@@ -585,6 +643,29 @@ class HybridPSOGAparsimony(object):
                         population._pop[p, nf] = 1.0
                     if population._pop[p,nf] < 0.0:
                         population._pop[p, nf] = 0.0
+
+
+            ######################
+            # Crossover step
+            ######################
+            nmating = int(np.floor(self.npart / 2))
+            mating = np.random.choice(list(range(2 * nmating)), size=(2 * nmating), replace=False).reshape((nmating, 2)) #Hace npart/2 parejas de partículas
+            for i in range(nmating):
+                if 0.8 > np.random.uniform(low=0, high=1): #Si no lo entiendo mal, con esto está "cruzando" el 80% de todas las parejas de partículas.
+                    #Creo que solo hay que cruzar a los buenos para sustituir a los malos (y los buenos se quedan donde estaban).
+                    #parents_indexes = mating[i,]
+                    parents_indexes = [2,3]
+                    children_indexes=[0,1]
+                    print("HYPERPARAMETNROS", nparams)
+                    print("FEATURES", nfs)
+                    print(parents_indexes)
+                    _crossover(population, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes)
+                    print("ANTES")
+                    print(population._pop[parents_indexes])
+                    print("DESPUES")
+                    print(population._pop[children_indexes])
+            #print("ITERACION", iter)
+            #print(mating)
 
             ######################
             # Mutation of FEATURES
