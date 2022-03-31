@@ -564,7 +564,7 @@ class PSOparsimony(object):
             #####################################################
             # Generation of the Neighbourhoods
             #####################################################
-            # If there is no improvement, the neighbourhood is changed. It also changes if particles have been deleted.
+            # If there is no improvement in the current iteration, the neighbourhood is changed. It also changes if particles have been deleted.
             if FitnessValSorted[0] <= self.best_score or update_neighbourhoods:
                 update_neighbourhoods = False
                 nb = list()
