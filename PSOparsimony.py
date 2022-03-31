@@ -278,7 +278,8 @@ class PSOparsimony(object):
                  IW_min=0.4,
                  K=3,
                  pmutation=None,
-                 pcrossover=None, #an array or a float (number between 0 and 1).
+                 pcrossover_elitists = None,  #an array or a float (number between 0 and 1).
+                 pcrossover_worst = None,  # an array or a float (number between 0 and 1).
                  tol = 1e-4,
                  rerank_error=0.005,
                  keep_history = False,
@@ -321,23 +322,47 @@ class PSOparsimony(object):
         # (otherwise, they will be influenced by the best of the iteration in each neighbourhood)
         self.best_global_thres = best_global_thres
 
-        if pcrossover is not None:
-            if isinstance(pcrossover,(list,np.ndarray)): #If it is a list or an np array
-                if len(pcrossover) < maxiter:
+        if pcrossover_elitists is not None:
+            if isinstance(pcrossover_elitists,(list,np.ndarray)): #If it is a list or an np array
+                if len(pcrossover_elitists) < maxiter:
                     # If the length of the pcrossover array is lower than the iterations, the array is completed with zeros
                     # up to the number of iterations.
-                    self.pcrossover = np.zeros(maxiter).astype(float)
-                    self.pcrossover[:len(pcrossover)] = pcrossover[:]
+                    self.pcrossover_elitists = np.zeros(maxiter).astype(float)
+                    self.pcrossover_elitists[:len(pcrossover_elitists)] = pcrossover_elitists[:]
                 else:
-                    self.pcrossover = pcrossover
+                    self.pcrossover_elitists = pcrossover_elitists
             else:
                 #If the parameter was a float, then an array is built in which each position contains that float.
-                self.pcrossover = np.full(maxiter, pcrossover, dtype=float)
-            # Ensure all numbers are in the range [0,0.5]
-            self.pcrossover[self.pcrossover > 0.5] = 0.5
-            self.pcrossover[self.pcrossover < 0] = 0
+                self.pcrossover_elitists = np.full(maxiter, pcrossover_elitists, dtype=float)
+            # Ensure all numbers are in the range [0,1]
+            self.pcrossover_elitists[self.pcrossover_elitists > 1] = 1
+            self.pcrossover_elitists[self.pcrossover_elitists < 0] = 0
         else:
-            self.pcrossover = None
+            self.pcrossover_elitists = None
+
+
+        if pcrossover_worst is not None:
+            if isinstance(pcrossover_worst,(list,np.ndarray)): #If it is a list or an np array
+                if len(pcrossover_worst) < maxiter:
+                    # If the length of the pcrossover array is lower than the iterations, the array is completed with zeros
+                    # up to the number of iterations.
+                    self.pcrossover_worst = np.zeros(maxiter).astype(float)
+                    self.pcrossover_worst[:len(pcrossover_worst)] = pcrossover_worst[:]
+                else:
+                    self.pcrossover_worst = pcrossover_worst
+            else:
+                #If the parameter was a float, then an array is built in which each position contains that float.
+                self.pcrossover_worst = np.full(maxiter, pcrossover_worst, dtype=float)
+
+            # Ensure that percentage is greater or equal to zero
+            self.pcrossover_worst[self.pcrossover_worst < 0] = 0
+            # Ensure that there are enough elitists
+            for i in range(maxiter):
+                if self.pcrossover_worst[i]>self.pcrossover_elitists[i]:
+                    self.pcrossover_worst[i]=self.pcrossover_elitists[i]
+
+        else:
+            self.pcrossover_worst = None
 
 
         if particles_to_delete is not None and len(particles_to_delete) < maxiter:
@@ -652,15 +677,25 @@ class PSOparsimony(object):
             ######################
             # Crossover step
             ######################
-            if self.pcrossover is not None and self.pcrossover[iter]>0:
+
+            # Note that the number of elitists should be even,
+            # since we do not permit duplicates (otherwise, a particle could have two descendants).
+            # This is why the variables half_npart_elitists and half_npart_worsts exist.
+
+            if self.pcrossover_elitists is not None and self.pcrossover_worst is not None \
+                    and self.pcrossover_elitists[iter]>0 and self.pcrossover_worst[iter]>0:
                 crossover_applied = True
-                half_npart_crossover = max(1,int(np.floor(self.npart * self.pcrossover[iter])/2)) #Minimum 2 particles
-                npart_crossover = 2*half_npart_crossover
-                indexes_best_particles = sort[ord_rerank[0:npart_crossover]]
-                mating_parents = np.random.choice(list(indexes_best_particles), size=(npart_crossover), replace=False).reshape((half_npart_crossover, 2))
-                indexes_worst_particles = sort[ord_rerank[-npart_crossover:]]
-                mating_children = indexes_worst_particles.reshape((half_npart_crossover,2))
-                for i in range(half_npart_crossover):
+                half_npart_elitists = max(1,int(np.floor(self.npart * self.pcrossover_elitists[iter])/2)) #Minimum 2 particles
+                npart_elitists = 2*half_npart_elitists
+                indexes_best_particles = sort[ord_rerank[0:npart_elitists]]
+                mating_parents = np.random.choice(list(indexes_best_particles), size=(npart_elitists), replace=False).reshape((half_npart_elitists, 2))
+
+                half_npart_worst = max(1, int(np.floor(
+                    self.npart * self.pcrossover_worst[iter]) / 2))  # Minimum 2 particles
+                npart_worst = 2 * half_npart_worst
+                indexes_worst_particles = sort[ord_rerank[-npart_worst:]]
+                mating_children = indexes_worst_particles.reshape((half_npart_worst,2))
+                for i in range(half_npart_worst):
                     parents_indexes = mating_parents[i,]
                     children_indexes = mating_children[i,]
                     _crossover(population, velocity, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes)
