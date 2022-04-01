@@ -189,11 +189,16 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
     #p = parents.copy()
     c = children_indexes.copy()
 
+    number_children = len(children_indexes) # Should be 1 or 2.
+
     velocities_parents = velocities[parents_indexes]
     velocities_children = velocities[parents_indexes].copy()
+    velocities_children = velocities_children[0:number_children] # This makes velocities_children to have one row if there is only 1 children.
 
     parents = population._pop[parents_indexes]
+
     children = population._pop[parents_indexes].copy()  # Children will be the crossover of the parents
+    children = children[0:number_children] # This makes children to have one row if there is only 1 children.
 
     pos_param_n = population._pos_n
     pos_param_c = population._pos_c
@@ -204,12 +209,13 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
     Betas = np.random.uniform(size=len(pos_param_n), low=0, high=1) * (1 + 2 * alpha) - alpha  # 1+alpha*2??????
     children[0, pos_param_n] = parents[0, pos_param_n] - Betas * parents[0, pos_param_n] + Betas * parents[
         1, pos_param_n]  ## MAP??
-    children[1, pos_param_n] = parents[1, pos_param_n] - Betas * parents[1, pos_param_n] + Betas * parents[
-        0, pos_param_n]
     velocities_children[0, pos_param_n] = velocities_parents[0, pos_param_n] - Betas * velocities_parents[0, pos_param_n] + Betas * velocities_parents[
         1, pos_param_n]
-    velocities_children[1, pos_param_n] = velocities_parents[1, pos_param_n] - Betas * velocities_parents[1, pos_param_n] + Betas * velocities_parents[
-        0, pos_param_n]
+    if number_children > 1:
+        children[1, pos_param_n] = parents[1, pos_param_n] - Betas * parents[1, pos_param_n] + Betas * parents[
+            0, pos_param_n]
+        velocities_children[1, pos_param_n] = velocities_parents[1, pos_param_n] - Betas * velocities_parents[1, pos_param_n] + Betas * velocities_parents[
+            0, pos_param_n]
 
 
     # Random swapping for categorical parameters
@@ -221,9 +227,10 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
         velocities_c_parent2 = velocities_parents[1, pos_param_c]
         pos_param_c = np.array(pos_param_c)[swap_param_c]
         children[0, pos_param_c] = parameters_c_parent2[swap_param_c]
-        children[1, pos_param_c] = parameters_c_parent1[swap_param_c]
         velocities_children[0, pos_param_c] = velocities_c_parent2[swap_param_c]
-        velocities_children[1, pos_param_c] = velocities_c_parent1[swap_param_c]
+        if number_children > 1:
+            children[1, pos_param_c] = parameters_c_parent1[swap_param_c]
+            velocities_children[1, pos_param_c] = velocities_c_parent1[swap_param_c]
 
     # Random swapping for features
     swap_param = np.random.uniform(size=len(population.colsnames), low=0, high=1) >= perc_to_swap
@@ -234,22 +241,29 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
         velocities_parent2 = velocities_parents[1, pos_features]
         pos_features = pos_features[swap_param]
         children[0, pos_features] = features_parent2[swap_param]
-        children[1, pos_features] = features_parent1[swap_param]
         velocities_children[0, pos_features] = velocities_parent2[swap_param]
-        velocities_children[1, pos_features] = velocities_parent1[swap_param]
+        if number_children > 1:
+            children[1, pos_features] = features_parent1[swap_param]
+            velocities_children[1, pos_features] = velocities_parent1[swap_param]
 
     # correct params that are outside (min and max)
     thereis_min = children[0] < population._min
     children[0, thereis_min] = population._min[thereis_min]
-    thereis_min = children[1] < population._min
-    children[1, thereis_min] = population._min[thereis_min]
+    if number_children > 1:
+        thereis_min = children[1] < population._min
+        children[1, thereis_min] = population._min[thereis_min]
 
     thereis_max = children[0] > population._max
     children[0, thereis_max] = population._max[thereis_max]
-    thereis_max = (children[1] > population._max)
-    children[1, thereis_max] = population._max[thereis_max]
+    if number_children > 1:
+        thereis_max = (children[1] > population._max)
+        children[1, thereis_max] = population._max[thereis_max]
 
-    aux = np.empty(2)
+    if number_children > 1:
+        aux = np.empty(2)
+    else:
+        aux = np.empty(1)
+
     aux[:] = np.nan
 
     population[c] = children
@@ -258,7 +272,6 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
     complexity[c] = aux.copy()
 
     velocities[c] = velocities_children
-
 
 
 class PSOparsimony(object):
@@ -353,14 +366,9 @@ class PSOparsimony(object):
             else:
                 #If the parameter was a float, then an array is built in which each position contains that float.
                 self.pcrossover_worst = np.full(maxiter, pcrossover_worst, dtype=float)
-
-            # Ensure that percentage is greater or equal to zero
+            # Ensure all numbers are in the range [0,1]
             self.pcrossover_worst[self.pcrossover_worst < 0] = 0
-            # Ensure that there are enough elitists
-            for i in range(maxiter):
-                if self.pcrossover_worst[i]>self.pcrossover_elitists[i]:
-                    self.pcrossover_worst[i]=self.pcrossover_elitists[i]
-
+            self.pcrossover_worst[self.pcrossover_worst > 1] = 1
         else:
             self.pcrossover_worst = None
 
@@ -678,29 +686,24 @@ class PSOparsimony(object):
             # Crossover step
             ######################
 
-            # Note that the number of elitists should be even,
-            # since we do not permit duplicates (otherwise, a particle could have two descendants).
-            # This is why the variables half_npart_elitists and half_npart_worsts exist.
-
             if self.pcrossover_elitists is not None and self.pcrossover_worst is not None \
                     and self.pcrossover_elitists[iter]>0 and self.pcrossover_worst[iter]>0:
                 crossover_applied = True
-                half_npart_elitists = max(1,int(np.floor(self.npart * self.pcrossover_elitists[iter])/2)) #Minimum 2 particles
-                npart_elitists = 2*half_npart_elitists
+
+                npart_elitists = max(2, int(np.floor(self.npart * self.pcrossover_elitists[iter])))  # Minimum 2 particles
                 indexes_best_particles = sort[ord_rerank[0:npart_elitists]]
-                mating_parents = np.random.choice(list(indexes_best_particles), size=(npart_elitists), replace=False).reshape((half_npart_elitists, 2))
-
-                half_npart_worst = max(1, int(np.floor(
-                    self.npart * self.pcrossover_worst[iter]) / 2))  # Minimum 2 particles
-                npart_worst = 2 * half_npart_worst
+                npart_worst = max(1, int(np.floor(self.npart * self.pcrossover_worst[iter])))  # Minimum 1 particle
                 indexes_worst_particles = sort[ord_rerank[-npart_worst:]]
-                mating_children = indexes_worst_particles.reshape((half_npart_worst,2))
-                for i in range(half_npart_worst):
-                    parents_indexes = mating_parents[i,]
-                    children_indexes = mating_children[i,]
+                i=0
+                while i < npart_worst: # We have to create npart_worst children from the parents.
+                    parents_indexes = np.random.choice(indexes_best_particles, replace=False, size = 2) # Two parents are selected randomly
+                    if i+1 == npart_worst: # If we only have to create one child
+                        children_indexes=[indexes_worst_particles[i]]
+                        i = i + 1
+                    else: # Otherwise, two children must be created.
+                        children_indexes = indexes_worst_particles[i:i+2]
+                        i = i + 2
                     _crossover(population, velocity, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes)
-
-
 
             #####################################################
             # Update positions and velocities following SPSO 2007
