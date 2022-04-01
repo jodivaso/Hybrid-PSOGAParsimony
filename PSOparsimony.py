@@ -193,12 +193,12 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
 
     velocities_parents = velocities[parents_indexes]
     velocities_children = velocities[parents_indexes].copy()
-    velocities_children = velocities_children[0:number_children] # This makes velocities_children to have one row if there is only 1 children.
+    velocities_children = velocities_children[0:number_children] # This makes velocities_children to have one row if there is only 1 child.
 
     parents = population._pop[parents_indexes]
 
     children = population._pop[parents_indexes].copy()  # Children will be the crossover of the parents
-    children = children[0:number_children] # This makes children to have one row if there is only 1 children.
+    children = children[0:number_children] # This makes children to have one row if there is only 1 child.
 
     pos_param_n = population._pos_n
     pos_param_c = population._pos_c
