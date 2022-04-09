@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import time
 from numpy.random import multinomial
+import random
 
 def parsimony_monitor(iter, fitnessval, bestfitnessVal, bestfitnessTst, bestcomplexity, minutes_gen, digits=7, *args):
     r"""Functions for monitoring GA-PARSIMONY algorithm evolution
@@ -191,7 +192,7 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
 
     number_children = len(children_indexes) # Should be 1 or 2.
 
-    velocities_parents = velocities[parents_indexes]
+    velocities_parents = velocities[parents_indexes].copy()
     velocities_children = velocities[parents_indexes].copy()
     velocities_children = velocities_children[0:number_children] # This makes velocities_children to have one row if there is only 1 child.
 
@@ -291,8 +292,8 @@ class PSOparsimony(object):
                  IW_min=0.4,
                  K=3,
                  pmutation=None,
-                 pcrossover_elitists = None,  #an array or a float (number between 0 and 1).
-                 pcrossover_worst = None,  # an array or a float (number between 0 and 1).
+                 pcrossover_elitists = None,  # an array or a float (number between 0 and 1).
+                 pcrossover = None,  # an array or a float (number between 0 and 1).
                  tol = 1e-4,
                  rerank_error=0.005,
                  keep_history = False,
@@ -354,23 +355,23 @@ class PSOparsimony(object):
             self.pcrossover_elitists = None
 
 
-        if pcrossover_worst is not None:
-            if isinstance(pcrossover_worst,(list,np.ndarray)): #If it is a list or an np array
-                if len(pcrossover_worst) < maxiter:
+        if pcrossover is not None:
+            if isinstance(pcrossover,(list,np.ndarray)): #If it is a list or an np array
+                if len(pcrossover) < maxiter:
                     # If the length of the pcrossover array is lower than the iterations, the array is completed with zeros
                     # up to the number of iterations.
-                    self.pcrossover_worst = np.zeros(maxiter).astype(float)
-                    self.pcrossover_worst[:len(pcrossover_worst)] = pcrossover_worst[:]
+                    self.pcrossover = np.zeros(maxiter).astype(float)
+                    self.pcrossover[:len(pcrossover)] = pcrossover[:]
                 else:
-                    self.pcrossover_worst = pcrossover_worst
+                    self.pcrossover = pcrossover
             else:
                 #If the parameter was a float, then an array is built in which each position contains that float.
-                self.pcrossover_worst = np.full(maxiter, pcrossover_worst, dtype=float)
+                self.pcrossover = np.full(maxiter, pcrossover, dtype=float)
             # Ensure all numbers are in the range [0,1]
-            self.pcrossover_worst[self.pcrossover_worst < 0] = 0
-            self.pcrossover_worst[self.pcrossover_worst > 1] = 1
+            self.pcrossover[self.pcrossover < 0] = 0
+            self.pcrossover[self.pcrossover > 1] = 1
         else:
-            self.pcrossover_worst = None
+            self.pcrossover = None
 
 
         if particles_to_delete is not None and len(particles_to_delete) < maxiter:
@@ -681,42 +682,47 @@ class PSOparsimony(object):
                     #best_fit_neighbourhood[i] = fitnessval[max_local_fit_pos]
 
 
-
             ######################
             # Crossover step
             ######################
 
-            if self.pcrossover_elitists is not None and self.pcrossover_worst is not None \
-                    and self.pcrossover_elitists[iter]>0 and self.pcrossover_worst[iter]>0:
-                crossover_applied = True
+            substituted_particles = []
+            if self.pcrossover is not None and self.pcrossover[iter] > 0:
+                npart_elitists = round(self.npart * self.pcrossover_elitists[iter])
+                nmating = int(np.floor(self.npart / 2))
+                mating = np.random.choice(list(range(2 * nmating)), size=(2 * nmating), replace=False).reshape((nmating, 2))
 
-                npart_elitists = max(2, int(np.floor(self.npart * self.pcrossover_elitists[iter])))  # Minimum 2 particles
-                indexes_best_particles = sort[ord_rerank[0:npart_elitists]]
-                npart_worst = max(1, int(np.floor(self.npart * self.pcrossover_worst[iter])))  # Minimum 1 particle
-                indexes_worst_particles = sort[ord_rerank[-npart_worst:]]
-                i=0
-                while i < npart_worst: # We have to create npart_worst children from the parents.
-                    parents_indexes = np.random.choice(indexes_best_particles, replace=False, size = 2) # Two parents are selected randomly
-                    if i+1 == npart_worst: # If we only have to create one child
-                        children_indexes=[indexes_worst_particles[i]]
-                        i = i + 1
-                    else: # Otherwise, two children must be created.
-                        children_indexes = indexes_worst_particles[i:i+2]
-                        i = i + 2
-                    _crossover(population, velocity, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes)
+                # We won't change the best particles, i.e, the elitists
+                if npart_elitists > 0:
+                    indexes_best_particles = sort[ord_rerank[0:npart_elitists]]
+                    elitists = population._pop[indexes_best_particles].copy()
+                    elitists_velocity = velocity[indexes_best_particles].copy()
+                    elitists_fitnessval = fitnessval[indexes_best_particles].copy()
+                    elitists_fitnesstst = fitnesstst[indexes_best_particles].copy()
+                    elitists_complexity = complexity[indexes_best_particles].copy()
+                for i in range(nmating):
+                    if self.pcrossover[iter] > np.random.uniform(low=0, high=1):
+                        parents_indexes = mating[i,]
+                        substituted_particles.append(parents_indexes)
+                        _crossover(population, velocity, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes=parents_indexes)
+                substituted_particles = [item for sublist in substituted_particles for item in sublist] # To flatten the list
+                # The elitists are preserved:
+                if npart_elitists > 0:
+                    population._pop[indexes_best_particles] = elitists
+                    velocity[indexes_best_particles] = elitists_velocity
+                    fitnessval[indexes_best_particles] = elitists_fitnessval
+                    fitnesstst[indexes_best_particles] = elitists_fitnesstst
+                    complexity[indexes_best_particles] = elitists_complexity
+                    substituted_particles = [i for i in substituted_particles if i not in indexes_best_particles]
 
             #####################################################
             # Update positions and velocities following SPSO 2007
             #####################################################
 
             # Solo tengo que actualizar los que no haya sustituido.
+            indexes_except_substituted_particles = [i for i in range(self.npart) if i not in substituted_particles]
 
-            indexes_except_worst_particles = range(self.npart)
-            if crossover_applied:
-                crossover_applied = False
-                indexes_except_worst_particles = [i for i in range(self.npart) if i not in indexes_worst_particles]
-
-            U1= np.random.uniform(low=0, high=1,
+            U1 = np.random.uniform(low=0, high=1,
                                    size=(self.npart, len(population._params) + nfs))  # En el artículo se llaman r1 y r2
             U2 = np.random.uniform(low=0, high=1,
                                    size=(self.npart, len(population._params) + nfs))  # En el artículo se llaman r1 y r2
@@ -725,11 +731,11 @@ class PSOparsimony(object):
 
             # Two first terms of the velocity
 
-            velocity[indexes_except_worst_particles,:] = IW * velocity[indexes_except_worst_particles,:] \
-                                                         + U1[indexes_except_worst_particles,:] * self.c1 * (best_pos_particle[indexes_except_worst_particles,:] - population._pop[indexes_except_worst_particles,:])
+            velocity[indexes_except_substituted_particles,:] = IW * velocity[indexes_except_substituted_particles,:] \
+                                                         + U1[indexes_except_substituted_particles,:] * self.c1 * (best_pos_particle[indexes_except_substituted_particles,:] - population._pop[indexes_except_substituted_particles,:])
 
-            velocity[indexes_except_worst_particles,:] = velocity[indexes_except_worst_particles,:] + self.c2 * U2[indexes_except_worst_particles,:] * (
-                        best_pos_neighbourhood[indexes_except_worst_particles,:] - population._pop[indexes_except_worst_particles,:])
+            velocity[indexes_except_substituted_particles,:] = velocity[indexes_except_substituted_particles,:] + self.c2 * U2[indexes_except_substituted_particles,:] * (
+                        best_pos_neighbourhood[indexes_except_substituted_particles,:] - population._pop[indexes_except_substituted_particles,:])
 
             # Limit velocity to vmax to avoid explosion
 
@@ -743,7 +749,7 @@ class PSOparsimony(object):
             ##############################
             nparams = len(population._params)
             for nf in range(nparams,nparams + nfs): # We must move to the features (the particles contain first hyper-parameters and then features)
-                for p in indexes_except_worst_particles:
+                for p in indexes_except_substituted_particles:
                     population._pop[p,nf] = population._pop[p,nf] + velocity[p,nf] # Update positions for the model positions (x = x + v)
                     # To ensure that the interval [0,1] is preserved
                     if population._pop[p, nf] > 1.0:
@@ -771,7 +777,7 @@ class PSOparsimony(object):
             #######################################################
 
             for j in range(nparams):
-                population._pop[indexes_except_worst_particles, j] = population._pop[indexes_except_worst_particles, j] + velocity[indexes_except_worst_particles, j]
+                population._pop[indexes_except_substituted_particles, j] = population._pop[indexes_except_substituted_particles, j] + velocity[indexes_except_substituted_particles, j]
 
             ################################################################################################
             # Confinement Method for SPSO 2007 - absorbing2007 (hydroPSO) - Deterministic Back (Clerc, 2007)
