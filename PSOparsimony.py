@@ -275,6 +275,7 @@ def _crossover(population, velocities, fitnessval, fitnesstst, complexity, paren
     velocities[c] = velocities_children
 
 
+
 class PSOparsimony(object):
 
     def __init__(self,
@@ -291,9 +292,9 @@ class PSOparsimony(object):
                  IW_max=0.9,
                  IW_min=0.4,
                  K=3,
-                 pmutation=None,
-                 pcrossover_elitists = None,  # an array or a float (number between 0 and 1).
-                 pcrossover = None,  # an array or a float (number between 0 and 1).
+                 pmutation = 0.1,
+                 #pcrossover_elitists = None,  # an array or a float (number between 0 and 1).
+                 pcrossover = None,  # an array or a float (number between 0 and 1), % of worst individuals to substitute from crossover.
                  tol = 1e-4,
                  rerank_error=0.005,
                  keep_history = False,
@@ -301,6 +302,8 @@ class PSOparsimony(object):
                  best_global_thres = 1,
                  particles_to_delete=None,
                  seed_ini = None,
+                 not_muted = 3,
+                 feat_mut_thres = 0.1,
                  verbose=0):
 
         self.type_ini_pop = type_ini_pop
@@ -321,10 +324,14 @@ class PSOparsimony(object):
         self.rerank_error = rerank_error
         self.verbose = verbose
         self.seed_ini = seed_ini
-        if pmutation is None:
-            self.pmutation = 1/len(features)
-        else:
-            self.pmutation = pmutation
+
+        self.pmutation = pmutation
+        # if pmutation is None:
+        #     self.pmutation = 1 / len(features)
+        # else:
+        #     self.pmutation = pmutation
+        self.not_muted = not_muted
+        self.feat_mut_thres = feat_mut_thres
 
         self.feat_thres = feat_thres
 
@@ -336,25 +343,6 @@ class PSOparsimony(object):
         # (otherwise, they will be influenced by the best of the iteration in each neighbourhood)
         self.best_global_thres = best_global_thres
 
-        if pcrossover_elitists is not None:
-            if isinstance(pcrossover_elitists,(list,np.ndarray)): #If it is a list or an np array
-                if len(pcrossover_elitists) < maxiter:
-                    # If the length of the pcrossover array is lower than the iterations, the array is completed with zeros
-                    # up to the number of iterations.
-                    self.pcrossover_elitists = np.zeros(maxiter).astype(float)
-                    self.pcrossover_elitists[:len(pcrossover_elitists)] = pcrossover_elitists[:]
-                else:
-                    self.pcrossover_elitists = pcrossover_elitists
-            else:
-                #If the parameter was a float, then an array is built in which each position contains that float.
-                self.pcrossover_elitists = np.full(maxiter, pcrossover_elitists, dtype=float)
-            # Ensure all numbers are in the range [0,1]
-            self.pcrossover_elitists[self.pcrossover_elitists > 1] = 1
-            self.pcrossover_elitists[self.pcrossover_elitists < 0] = 0
-        else:
-            self.pcrossover_elitists = None
-
-
         if pcrossover is not None:
             if isinstance(pcrossover,(list,np.ndarray)): #If it is a list or an np array
                 if len(pcrossover) < maxiter:
@@ -365,7 +353,7 @@ class PSOparsimony(object):
                 else:
                     self.pcrossover = pcrossover
             else:
-                #If the parameter was a float, then an array is built in which each position contains that float.
+                # If the parameter was a float, then an array is built in which each position contains that float.
                 self.pcrossover = np.full(maxiter, pcrossover, dtype=float)
             # Ensure all numbers are in the range [0,1]
             self.pcrossover[self.pcrossover < 0] = 0
@@ -586,8 +574,8 @@ class PSOparsimony(object):
             if self.particles_to_delete is not None and self.particles_to_delete[iter]>0:
                 # particles_to_delete[iter] contains the number of particles to be deleted in that iteration
                 # We delete the worse particles at that point (in global, not in that iteration).
-                sort = order(bestGlobalFitnessVal, kind='heapsort', decreasing=True, na_last=True)
-                sort_not_deleted = [x for x in sort if x not in deleted_particles]
+                sort1 = order(bestGlobalFitnessVal, kind='heapsort', decreasing=True, na_last=True)
+                sort_not_deleted = [x for x in sort1 if x not in deleted_particles]
                 deleted_particles = deleted_particles + sort_not_deleted[-self.particles_to_delete[iter]:]
                 valid_particles = [x for x in range(self.npart) if x not in deleted_particles]
                 update_neighbourhoods = True
@@ -686,41 +674,67 @@ class PSOparsimony(object):
             # Crossover step
             ######################
 
-            substituted_particles = []
+            indexes_worst_particles = []
             if self.pcrossover is not None and self.pcrossover[iter] > 0:
-                npart_elitists = round(self.npart * self.pcrossover_elitists[iter])
+                ######################
+                # Selection substep
+                ######################
+
+                q = 0.25
+                rank = list(range(self.npart))
+                prob = np.array(list(map(lambda x: q * (1 - q) ** (x), rank)))
+                prob = prob / prob.sum() # En prob, metemos las probabilidades. El primer elemento tiene más probabilidad, y así sucesivamente.
+                # Ahora en sel, aplicamos esas probabilidades para seleccionar, teniendo en cuenta que los índices de las mejores están en sort[ord_rerank]
+                # (porque la población no está ordenada, así que no podemos usar rank como en GA).
+                sel = np.random.choice(sort[ord_rerank], size=self.npart, replace=True, p=list(map(lambda x: np.min(
+                    np.ma.masked_array(np.array([max(0, x), 1]), np.isnan(np.array([max(0, x), 1])))), prob)))
+                # Cambia la población para seleccionar los que se van a reproducir. Puede haber filas repetidas en population.
+                # Así, luego se pueden cruzar más veces.
+                population_selection = copy.deepcopy(population) # Hago deepcopy porque es array de arrays.
+                population_selection._pop = population_selection._pop[sel]
+                fitnessval_selection = fitnessval[sel].copy()
+                fitnesstst_selection = fitnesstst[sel].copy()
+                complexity_selection = complexity[sel].copy()
+                velocity_selection = velocity[sel].copy()
+
+                ######################
+                # Crossover substep
+                ######################
+
                 nmating = int(np.floor(self.npart / 2))
                 mating = np.random.choice(list(range(2 * nmating)), size=(2 * nmating), replace=False).reshape((nmating, 2))
 
-                # We won't change the best particles, i.e, the elitists
-                if npart_elitists > 0:
-                    indexes_best_particles = sort[ord_rerank[0:npart_elitists]]
-                    elitists = population._pop[indexes_best_particles].copy()
-                    elitists_velocity = velocity[indexes_best_particles].copy()
-                    elitists_fitnessval = fitnessval[indexes_best_particles].copy()
-                    elitists_fitnesstst = fitnesstst[indexes_best_particles].copy()
-                    elitists_complexity = complexity[indexes_best_particles].copy()
+                # Hacemos crossover de la población seleccionada
+                population_crossover = copy.deepcopy(population_selection)
+                fitnessval_crossover = fitnessval_selection.copy()
+                fitnesstst_crossover = fitnesstst_selection.copy()
+                complexity_crossover = complexity_selection.copy()
+                velocity_crossover = velocity_selection.copy()
+
                 for i in range(nmating):
-                    if self.pcrossover[iter] > np.random.uniform(low=0, high=1):
-                        parents_indexes = mating[i,]
-                        substituted_particles.append(parents_indexes)
-                        _crossover(population, velocity, fitnessval, fitnesstst, complexity, parents_indexes, children_indexes=parents_indexes)
-                substituted_particles = [item for sublist in substituted_particles for item in sublist] # To flatten the list
-                # The elitists are preserved:
-                if npart_elitists > 0:
-                    population._pop[indexes_best_particles] = elitists
-                    velocity[indexes_best_particles] = elitists_velocity
-                    fitnessval[indexes_best_particles] = elitists_fitnessval
-                    fitnesstst[indexes_best_particles] = elitists_fitnesstst
-                    complexity[indexes_best_particles] = elitists_complexity
-                    substituted_particles = [i for i in substituted_particles if i not in indexes_best_particles]
+                    parents_indexes = mating[i,]
+                    # Voy haciendo el crossover en la nueva población
+                    _crossover(population_crossover, velocity_crossover, fitnessval_crossover, fitnesstst_crossover, complexity_crossover, parents_indexes, children_indexes=parents_indexes)
+
+                # Ahora cojo la población original, y sustituyo el % de malos a sustituir por individuos aleatorios de la población del crossover.
+                npart_worst = max(1, int(np.floor(self.npart * self.pcrossover[iter])))
+                indexes_worst_particles = sort[ord_rerank[-npart_worst:]]
+                # Array aleatorio de tamaño npart y números entre 0 y npart - 1. También podría hacer un suffle.
+                # No repito aquí (pero podrá haber padres repetidos porque en population_crossover podría haber filas repetidas):
+                random_array = np.random.choice(range(self.npart), self.npart, replace=False)
+                for i in indexes_worst_particles: #Esto ya me asegura que no toco los elitistas, solo sustituyo las partículas malas.
+                    population._pop[i] = population_crossover._pop[random_array[i]]
+                    fitnessval[i] = fitnessval_crossover[random_array[i]]
+                    fitnesstst[i] = fitnesstst_crossover[random_array[i]]
+                    complexity[i] = complexity_crossover[random_array[i]]
+                    velocity[i] = velocity[random_array[i]]
 
             #####################################################
             # Update positions and velocities following SPSO 2007
             #####################################################
 
             # Solo tengo que actualizar los que no haya sustituido.
-            indexes_except_substituted_particles = [i for i in range(self.npart) if i not in substituted_particles]
+            indexes_except_substituted_particles = [i for i in range(self.npart) if i not in indexes_worst_particles]
 
             U1 = np.random.uniform(low=0, high=1,
                                    size=(self.npart, len(population._params) + nfs))  # En el artículo se llaman r1 y r2
@@ -761,15 +775,31 @@ class PSOparsimony(object):
             ######################
             # Mutation of FEATURES
             # ####################
+
             if self.pmutation > 0:
-                rnd_mut = np.random.uniform(size = (self.npart, nfs))
-                for p in range(self.npart):
-                    for nf in range(nparams,nparams + nfs):
-                        if rnd_mut[p, nf - nparams] < self.pmutation:
-                            if population._pop[p, nf] < 0.5:
-                                population._pop[p, nf] = np.random.uniform(low=0.5, high=1.0)
-                            else:
-                                population._pop[p, nf] = np.random.uniform(low=0.0, high=0.5)
+                # Uniform random mutation (except first individual)
+                nfts_to_mute = round(self.pmutation * nfs * self.npart)
+                if nfts_to_mute < 1:
+                    nfts_to_mute = 1
+                indexes_to_mute = sort[ord_rerank[self.not_muted:]]
+                for _ in range(nfts_to_mute):
+                    i = np.random.choice(indexes_to_mute)
+                    j = np.random.randint(0, population.population.shape[1] - 1)
+                    population._pop[i, nparams + j] = population.random_gen[j](j, feat_mut_thres=self.feat_mut_thres)
+                    fitnessval[i] = np.nan
+                    fitnesstst[i] = np.nan
+                    complexity[i] = np.nan
+
+
+            # if self.pmutation > 0:
+            #     rnd_mut = np.random.uniform(size = (self.npart, nfs))
+            #     for p in range(self.npart):
+            #         for nf in range(nparams,nparams + nfs):
+            #             if rnd_mut[p, nf - nparams] < self.pmutation:
+            #                 if population._pop[p, nf] < 0.5:
+            #                     population._pop[p, nf] = np.random.uniform(low=0.5, high=1.0)
+            #                 else:
+            #                     population._pop[p, nf] = np.random.uniform(low=0.0, high=0.5)
 
 
             #######################################################
