@@ -785,7 +785,7 @@ class PSOparsimony(object):
                 indexes_to_mute = sort[ord_rerank[self.not_muted:]]
                 for _ in range(nfts_to_mute):
                     i = np.random.choice(indexes_to_mute)
-                    j = np.random.randint(0, population.population.shape[1] - 1)
+                    j = np.random.randint(0, nfs - 1)
                     population._pop[i, nparams + j] = population.random_gen[j](j, feat_mut_thres=self.feat_mut_thres)
                     fitnessval[i] = np.nan
                     fitnesstst[i] = np.nan
