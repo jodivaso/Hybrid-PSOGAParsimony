@@ -679,7 +679,8 @@ class PSOparsimony(object):
                 ######################
                 # Selection substep
                 ######################
-
+                # Nonlinear-rank selection
+                # Michalewicz (1996) Genetic Algorithms + Data Structures = Evolution Programs. p. 60
                 q = 0.25
                 rank = list(range(self.npart))
                 prob = np.array(list(map(lambda x: q * (1 - q) ** (x), rank)))
